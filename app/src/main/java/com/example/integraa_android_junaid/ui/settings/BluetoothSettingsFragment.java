@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.example.integraa_android_junaid.R;
 import com.example.integraa_android_junaid.data.bluetooth.BluetoothDeviceModel;
 import com.example.integraa_android_junaid.data.bluetooth.BluetoothManager;
+import com.example.integraa_android_junaid.ui.main.MainActivity;
 import com.google.android.material.button.MaterialButton;
 
 import java.util.List;
@@ -105,6 +106,10 @@ public class BluetoothSettingsFragment extends DialogFragment {
                         // Small delay to show the toast message
                         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                             if (isAdded()) {
+                                // Notify parent activity that device was selected
+                                if (getActivity() instanceof MainActivity) {
+                                    ((MainActivity) getActivity()).onDeviceSelected();
+                                }
                                 dismiss();
                             }
                         }, 500);

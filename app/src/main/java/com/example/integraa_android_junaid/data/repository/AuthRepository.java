@@ -33,25 +33,37 @@ public class AuthRepository {
                             }
                             callback.onSuccess(loginResponse);
                         } else {
-                            callback.onError("Token not found in response");
+                            callback.onError("Token not found in response. Please try again.");
                         }
                     } else {
-                        String errorMsg = "Login failed";
+                        String errorMsg;
                         if (response.code() == 401 || response.code() == 403) {
-                            errorMsg = "Invalid credentials";
+                            errorMsg = "Invalid username or password. Please check your credentials and try again.";
+                        } else if (response.code() >= 500) {
+                            errorMsg = "Server error. Please try again later.";
                         } else if (response.code() >= 400) {
-                            errorMsg = "Login failed: " + response.code();
+                            errorMsg = "Login failed. Please check your connection and try again.";
+                        } else {
+                            errorMsg = "Login failed. Please try again.";
                         }
                         callback.onError(errorMsg);
                     }
                 } catch (Exception e) {
-                    callback.onError("Error processing login response: " + e.getMessage());
+                    callback.onError("Error processing login response. Please try again.");
                 }
             }
 
             @Override
             public void onFailure(Call<LoginResponse> call, Throwable t) {
-                callback.onError("Network error: " + t.getMessage());
+                String errorMsg;
+                if (t instanceof java.net.UnknownHostException || t instanceof java.net.ConnectException) {
+                    errorMsg = "Unable to connect to server. Please check your internet connection.";
+                } else if (t instanceof java.net.SocketTimeoutException) {
+                    errorMsg = "Connection timeout. Please check your internet connection and try again.";
+                } else {
+                    errorMsg = "Network error. Please check your connection and try again.";
+                }
+                callback.onError(errorMsg);
             }
         });
     }

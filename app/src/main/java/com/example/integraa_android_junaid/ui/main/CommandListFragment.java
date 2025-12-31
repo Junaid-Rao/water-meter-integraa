@@ -14,6 +14,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.example.integraa_android_junaid.R;
 import com.example.integraa_android_junaid.data.api.models.Action;
+import com.example.integraa_android_junaid.data.api.models.Command;
 import com.example.integraa_android_junaid.ui.command.CommandDialogFragment;
 
 public class CommandListFragment extends Fragment {
@@ -56,38 +57,66 @@ public class CommandListFragment extends Fragment {
             adapter = new CommandAdapter();
             adapter.setOnCommandClickListener(commandItem -> {
                 try {
-                    if (commandItem == null || commandItem.getCommand() == null) {
-                        if (getContext() != null) {
-                            android.widget.Toast.makeText(getContext(), "Command data is invalid", android.widget.Toast.LENGTH_SHORT).show();
-                        }
+                    // Comprehensive null checks
+                    if (commandItem == null) {
+                        showErrorToast("Command item is null");
+                        return;
+                    }
+                    
+                    if (commandItem.getCommand() == null) {
+                        showErrorToast("Command data is invalid");
+                        return;
+                    }
+                    
+                    Command command = commandItem.getCommand();
+                    if (command.getLabel() == null && command.getPayload() == null) {
+                        showErrorToast("Command has no data");
                         return;
                     }
 
-                    if (!isAdded() || getActivity() == null) {
-                        if (getContext() != null) {
-                            android.widget.Toast.makeText(getContext(), "Fragment not ready. Please try again.", android.widget.Toast.LENGTH_SHORT).show();
-                        }
+                    if (!isAdded() || getActivity() == null || getContext() == null) {
+                        showErrorToast("Fragment not ready. Please try again.");
                         return;
                     }
 
-                    CommandDialogFragment dialog = CommandDialogFragment.newInstance(
-                            commandItem.getKey() != null ? commandItem.getKey() : "command",
-                            commandItem.getCommand()
-                    );
+                    // Validate fragment manager is available
+                    if (getActivity().getSupportFragmentManager() == null) {
+                        showErrorToast("Unable to open dialog. Please try again.");
+                        return;
+                    }
+
+                    // Create dialog with proper error handling
+                    String commandKey = commandItem.getKey();
+                    if (commandKey == null || commandKey.isEmpty()) {
+                        commandKey = command.getLabel() != null 
+                            ? command.getLabel().toLowerCase().replace(" ", "_").replace("/", "_")
+                            : "command";
+                    }
+
+                    CommandDialogFragment dialog = CommandDialogFragment.newInstance(commandKey, command);
+                    
+                    // Check if another dialog is already showing
+                    if (getActivity().getSupportFragmentManager().findFragmentByTag("CommandDialog") != null) {
+                        showErrorToast("Command dialog is already open");
+                        return;
+                    }
 
                     // Use activity's fragment manager for ViewPager2 fragments
                     dialog.show(getActivity().getSupportFragmentManager(), "CommandDialog");
                 } catch (IllegalStateException e) {
                     // Fragment not attached or activity destroyed
                     e.printStackTrace();
-                    if (getContext() != null) {
-                        android.widget.Toast.makeText(getContext(), "Unable to open command dialog. Please try again.", android.widget.Toast.LENGTH_SHORT).show();
-                    }
+                    showErrorToast("Unable to open command dialog. Please try again.");
+                } catch (NullPointerException e) {
+                    e.printStackTrace();
+                    showErrorToast("Command data is incomplete. Please try again.");
                 } catch (Exception e) {
                     e.printStackTrace();
-                    if (getContext() != null) {
-                        android.widget.Toast.makeText(getContext(), "Error opening command dialog: " + (e.getMessage() != null ? e.getMessage() : "Unknown error"), android.widget.Toast.LENGTH_SHORT).show();
+                    String errorMsg = e.getMessage();
+                    if (errorMsg == null || errorMsg.isEmpty()) {
+                        errorMsg = "Unknown error occurred";
                     }
+                    showErrorToast("Error opening command dialog: " + errorMsg);
                 }
             });
 
@@ -115,6 +144,17 @@ public class CommandListFragment extends Fragment {
         }
 
         return view;
+    }
+    
+    private void showErrorToast(String message) {
+        try {
+            if (getContext() != null && isAdded()) {
+                android.widget.Toast.makeText(getContext(), message, android.widget.Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            // Ignore if context is not available
+            e.printStackTrace();
+        }
     }
 }
 

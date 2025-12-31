@@ -43,6 +43,9 @@ public class BluetoothManager {
     private Set<String> scannedDeviceAddresses = new HashSet<>();
     private Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final long SCAN_DURATION_MS = 10000; // 10 seconds
+    private static final long CONNECTION_TIMEOUT_MS = 15000; // 15 seconds
+    private Handler connectionTimeoutHandler;
+    private BluetoothGattCallback currentConnectionCallback;
 
     public BluetoothManager(Context context) {
         this.context = context;
@@ -143,6 +146,17 @@ public class BluetoothManager {
             disconnect();
         }
 
+        // Cancel any existing connection timeout
+        cancelConnectionTimeout();
+
+        // Store callback for timeout handling
+        currentConnectionCallback = callback;
+
+        // Set BluetoothManager reference in callback
+        if (callback != null) {
+            callback.setBluetoothManager(this);
+        }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 bluetoothGatt = device.connectGatt(context, false, callback);
@@ -151,16 +165,43 @@ public class BluetoothManager {
             }
             connectedDevice = device;
             Log.d(TAG, "Connecting to device: " + device.getAddress());
+
+            // Start connection timeout
+            startConnectionTimeout(callback);
         } catch (SecurityException e) {
             Log.e(TAG, "Permission denied connecting to device", e);
+            cancelConnectionTimeout();
             if (callback != null) {
                 callback.onConnectionFailed("Permission denied");
             }
         } catch (Exception e) {
             Log.e(TAG, "Error connecting to device", e);
+            cancelConnectionTimeout();
             if (callback != null) {
                 callback.onConnectionFailed("Connection error: " + e.getMessage());
             }
+        }
+    }
+
+    private void startConnectionTimeout(BluetoothGattCallback callback) {
+        cancelConnectionTimeout();
+        connectionTimeoutHandler = new Handler(Looper.getMainLooper());
+        connectionTimeoutHandler.postDelayed(() -> {
+            if (bluetoothGatt != null && !isConnected()) {
+                Log.w(TAG, "Connection timeout - disconnecting");
+                disconnect();
+                if (callback != null) {
+                    callback.onConnectionFailed("Connection timeout. Device may be out of range or not responding.");
+                }
+                currentConnectionCallback = null;
+            }
+        }, CONNECTION_TIMEOUT_MS);
+    }
+
+    private void cancelConnectionTimeout() {
+        if (connectionTimeoutHandler != null) {
+            connectionTimeoutHandler.removeCallbacksAndMessages(null);
+            connectionTimeoutHandler = null;
         }
     }
 
@@ -189,47 +230,117 @@ public class BluetoothManager {
     }
 
     public void disconnect() {
+        cancelConnectionTimeout();
         if (bluetoothGatt != null) {
-            bluetoothGatt.disconnect();
-            bluetoothGatt.close();
+            try {
+                bluetoothGatt.disconnect();
+                bluetoothGatt.close();
+            } catch (Exception e) {
+                Log.e(TAG, "Error disconnecting", e);
+            }
             bluetoothGatt = null;
         }
         connectedDevice = null;
+        currentConnectionCallback = null;
     }
 
-    public boolean sendHexPayload(String hexPayload) {
+    /**
+     * Send hex payload to connected Bluetooth device
+     * @param hexPayload Hex string payload to send
+     * @return Result object with success status and error message
+     */
+    public SendResult sendHexPayload(String hexPayload) {
+        if (hexPayload == null || hexPayload.isEmpty()) {
+            return new SendResult(false, "Payload is empty");
+        }
+
+        // Validate hex payload format
+        if (!isValidHexString(hexPayload)) {
+            return new SendResult(false, "Invalid hex payload format");
+        }
+
         if (bluetoothGatt == null) {
             Log.e(TAG, "Bluetooth GATT not connected");
-            return false;
+            return new SendResult(false, "Bluetooth device not connected");
         }
 
         try {
             // Convert hex string to byte array
             byte[] bytes = hexStringToByteArray(hexPayload);
+            if (bytes == null || bytes.length == 0) {
+                return new SendResult(false, "Failed to convert hex payload to bytes");
+            }
 
             BluetoothGattService service = bluetoothGatt.getService(SERVICE_UUID);
             if (service == null) {
-                Log.e(TAG, "Service not found");
-                return false;
+                Log.e(TAG, "Service not found: " + SERVICE_UUID);
+                return new SendResult(false, "Bluetooth service not found. Device may not support required service.");
             }
 
             BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
             if (characteristic == null) {
-                Log.e(TAG, "Characteristic not found");
-                return false;
+                Log.e(TAG, "Characteristic not found: " + CHARACTERISTIC_UUID);
+                return new SendResult(false, "Bluetooth characteristic not found. Device may not support required characteristic.");
+            }
+
+            // Check if characteristic supports write
+            int properties = characteristic.getProperties();
+            if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) == 0 &&
+                (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) == 0) {
+                return new SendResult(false, "Characteristic does not support write operations");
             }
 
             characteristic.setValue(bytes);
             boolean success = bluetoothGatt.writeCharacteristic(characteristic);
             if (success) {
-                Log.d(TAG, "Payload sent: " + hexPayload);
+                Log.d(TAG, "Payload sent successfully: " + hexPayload);
+                return new SendResult(true, null);
             } else {
                 Log.e(TAG, "Failed to write characteristic");
+                return new SendResult(false, "Failed to write to Bluetooth device. Device may be out of range or disconnected.");
             }
-            return success;
+        } catch (SecurityException e) {
+            Log.e(TAG, "Permission denied sending payload", e);
+            return new SendResult(false, "Bluetooth permission denied");
+        } catch (IllegalArgumentException e) {
+            Log.e(TAG, "Invalid hex payload", e);
+            return new SendResult(false, "Invalid hex payload format: " + e.getMessage());
         } catch (Exception e) {
             Log.e(TAG, "Error sending payload", e);
+            return new SendResult(false, "Error sending payload: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Validate hex string format
+     */
+    private boolean isValidHexString(String hex) {
+        if (hex == null || hex.isEmpty()) {
             return false;
+        }
+        // Remove whitespace and check if all characters are valid hex
+        hex = hex.replaceAll("\\s", "");
+        return hex.matches("^[0-9A-Fa-f]+$") && hex.length() % 2 == 0;
+    }
+
+    /**
+     * Result class for sendHexPayload operation
+     */
+    public static class SendResult {
+        private final boolean success;
+        private final String errorMessage;
+
+        public SendResult(boolean success, String errorMessage) {
+            this.success = success;
+            this.errorMessage = errorMessage;
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        public String getErrorMessage() {
+            return errorMessage;
         }
     }
 
@@ -425,12 +536,43 @@ public class BluetoothManager {
     }
 
     public abstract static class BluetoothGattCallback extends android.bluetooth.BluetoothGattCallback {
+        private BluetoothManager bluetoothManager;
+
+        public void setBluetoothManager(BluetoothManager manager) {
+            this.bluetoothManager = manager;
+        }
+
         @Override
         public void onConnectionStateChange(android.bluetooth.BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
-                gatt.discoverServices();
-                onConnected();
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    // Cancel timeout on successful connection
+                    if (bluetoothManager != null) {
+                        bluetoothManager.cancelConnectionTimeout();
+                    }
+                    gatt.discoverServices();
+                    onConnected();
+                } else {
+                    // Connection failed
+                    if (bluetoothManager != null) {
+                        bluetoothManager.cancelConnectionTimeout();
+                    }
+                    String errorMsg = "Connection failed";
+                    if (status == 8) { // GATT_INTERNAL_ERROR
+                        errorMsg = "Connection failed: Internal error. Device may be out of range.";
+                    } else if (status == 19) { // GATT_CONN_TERMINATE_PEER_USER
+                        errorMsg = "Connection terminated by device";
+                    } else if (status == 22) { // GATT_CONN_TIMEOUT
+                        errorMsg = "Connection timeout. Device not responding.";
+                    } else if (status == 133) { // GATT_ERROR
+                        errorMsg = "Connection error. Please ensure device is powered on and in range.";
+                    }
+                    onConnectionFailed(errorMsg);
+                }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                if (bluetoothManager != null) {
+                    bluetoothManager.cancelConnectionTimeout();
+                }
                 onDisconnected();
             }
         }
@@ -440,7 +582,16 @@ public class BluetoothManager {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 onServicesDiscovered();
             } else {
-                onConnectionFailed("Service discovery failed");
+                if (bluetoothManager != null) {
+                    bluetoothManager.cancelConnectionTimeout();
+                }
+                String errorMsg = "Service discovery failed";
+                if (status == 8) {
+                    errorMsg = "Service discovery failed: Internal error";
+                } else if (status == 133) {
+                    errorMsg = "Service discovery failed: GATT error. Device may not support required services.";
+                }
+                onConnectionFailed(errorMsg);
             }
         }
 

@@ -17,11 +17,15 @@ public class SendCommandUseCase {
     public void execute(String payload, Map<String, String> parameterValues, SendCommandCallback callback) {
         try {
             String finalPayload = payloadBuilder.buildPayload(payload, parameterValues);
-            boolean success = bluetoothManager.sendHexPayload(finalPayload);
-            if (success) {
+            BluetoothManager.SendResult result = bluetoothManager.sendHexPayload(finalPayload);
+            if (result.isSuccess()) {
                 callback.onSuccess(finalPayload);
             } else {
-                callback.onError("Failed to send payload to Bluetooth device");
+                String errorMsg = result.getErrorMessage();
+                if (errorMsg == null || errorMsg.isEmpty()) {
+                    errorMsg = "Failed to send payload to Bluetooth device";
+                }
+                callback.onError(errorMsg);
             }
         } catch (Exception e) {
             callback.onError("Error building payload: " + e.getMessage());

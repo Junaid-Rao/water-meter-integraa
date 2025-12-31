@@ -44,15 +44,25 @@ public class PermissionRepository {
                     if (response.code() == 401 || response.code() == 403) {
                         preferencesManager.clearToken();
                         callback.onSessionExpired();
+                    } else if (response.code() >= 500) {
+                        callback.onError("Server error. Please try again later.");
                     } else {
-                        callback.onError("Failed to fetch permissions: " + response.code());
+                        callback.onError("Failed to fetch permissions. Please check your connection and try again.");
                     }
                 }
             }
 
             @Override
             public void onFailure(Call<PermissionResponse> call, Throwable t) {
-                callback.onError("Network error: " + t.getMessage());
+                String errorMsg;
+                if (t instanceof java.net.UnknownHostException || t instanceof java.net.ConnectException) {
+                    errorMsg = "Unable to connect to server. Please check your internet connection.";
+                } else if (t instanceof java.net.SocketTimeoutException) {
+                    errorMsg = "Connection timeout. Please check your internet connection and try again.";
+                } else {
+                    errorMsg = "Network error. Please check your connection and try again.";
+                }
+                callback.onError(errorMsg);
             }
         });
     }

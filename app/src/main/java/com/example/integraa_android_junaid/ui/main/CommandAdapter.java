@@ -96,9 +96,37 @@ public class CommandAdapter extends RecyclerView.Adapter<CommandAdapter.CommandV
         }
 
         public void bind(CommandItem item) {
+            if (item == null || item.getCommand() == null) {
+                // Handle null command gracefully
+                if (commandLabelTextView != null) {
+                    commandLabelTextView.setText("Unknown Command");
+                }
+                if (commandPayloadTextView != null) {
+                    commandPayloadTextView.setText("Payload: N/A");
+                }
+                return;
+            }
+            
             Command command = item.getCommand();
-            commandLabelTextView.setText(command.getLabel());
-            commandPayloadTextView.setText("Payload: " + command.getPayload());
+            try {
+                if (commandLabelTextView != null) {
+                    String label = command.getLabel();
+                    commandLabelTextView.setText(label != null ? label : "Command");
+                }
+                if (commandPayloadTextView != null) {
+                    String payload = command.getPayload();
+                    commandPayloadTextView.setText("Payload: " + (payload != null ? payload : "N/A"));
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                // Fallback display
+                if (commandLabelTextView != null) {
+                    commandLabelTextView.setText("Error loading command");
+                }
+                if (commandPayloadTextView != null) {
+                    commandPayloadTextView.setText("Payload: Error");
+                }
+            }
         }
     }
 }

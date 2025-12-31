@@ -96,7 +96,7 @@ public class LoginActivity extends AppCompatActivity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
-                Toast.makeText(this, "Location permission is required for login", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, getString(R.string.error_location_permission), Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -106,12 +106,12 @@ public class LoginActivity extends AppCompatActivity {
         String password = passwordEditText.getText().toString().trim();
 
         if (username.isEmpty()) {
-            usernameEditText.setError("Username is required");
+            usernameEditText.setError(getString(R.string.error_username_required));
             return;
         }
 
         if (password.isEmpty()) {
-            passwordEditText.setError("Password is required");
+            passwordEditText.setError(getString(R.string.error_password_required));
             return;
         }
 
@@ -154,7 +154,7 @@ public class LoginActivity extends AppCompatActivity {
                         finish();
                     } catch (Exception e) {
                         e.printStackTrace();
-                        Toast.makeText(this, "Error navigating to main screen: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, getString(R.string.error_login_failed), Toast.LENGTH_LONG).show();
                     }
                 }, 200);
             } catch (Exception e) {
@@ -167,7 +167,7 @@ public class LoginActivity extends AppCompatActivity {
                     finish();
                 } catch (Exception ex) {
                     ex.printStackTrace();
-                    Toast.makeText(this, "Error navigating: " + ex.getMessage(), Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, getString(R.string.error_login_failed), Toast.LENGTH_LONG).show();
                 }
             }
         });

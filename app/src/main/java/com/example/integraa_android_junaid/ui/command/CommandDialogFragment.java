@@ -11,6 +11,8 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.DialogFragment;
 import androidx.lifecycle.ViewModelProvider;
 
@@ -58,11 +60,22 @@ public class CommandDialogFragment extends DialogFragment {
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setStyle(DialogFragment.STYLE_NORMAL, R.style.Theme_Integraaandroidjunaid);
-        if (getArguments() != null) {
-            commandKey = getArguments().getString(ARG_COMMAND_KEY);
-            String commandJson = getArguments().getString(ARG_COMMAND);
-            Gson gson = new Gson();
-            command = gson.fromJson(commandJson, Command.class);
+        try {
+            if (getArguments() != null) {
+                commandKey = getArguments().getString(ARG_COMMAND_KEY);
+                String commandJson = getArguments().getString(ARG_COMMAND);
+                if (commandJson != null && !commandJson.isEmpty()) {
+                    Gson gson = new Gson();
+                    command = gson.fromJson(commandJson, Command.class);
+                } else {
+                    android.util.Log.e("CommandDialogFragment", "Command JSON is null or empty");
+                }
+            } else {
+                android.util.Log.e("CommandDialogFragment", "Arguments bundle is null");
+            }
+        } catch (Exception e) {
+            android.util.Log.e("CommandDialogFragment", "Error parsing command from arguments", e);
+            command = null;
         }
     }
 
@@ -104,6 +117,51 @@ public class CommandDialogFragment extends DialogFragment {
         }
 
         return view;
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        if (getDialog() != null && getDialog().getWindow() != null) {
+            // Set dialog window to respect safe areas
+            android.view.Window window = getDialog().getWindow();
+            window.setLayout(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            
+            // Enable edge-to-edge and handle system bars
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                window.getDecorView().setSystemUiVisibility(
+                        android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE |
+                        android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                );
+            }
+            
+            // Apply window insets for safe area handling
+            if (getView() != null) {
+                android.view.View rootView = getView();
+                ViewCompat.setOnApplyWindowInsetsListener(rootView, (v, insets) -> {
+                    int systemBars = WindowInsetsCompat.Type.systemBars();
+                    androidx.core.graphics.Insets windowInsets = insets.getInsets(systemBars);
+                    int topInset = windowInsets.top;
+                    int bottomInset = windowInsets.bottom;
+                    int leftInset = windowInsets.left;
+                    int rightInset = windowInsets.right;
+                    
+                    // Apply safe area padding
+                    v.setPadding(
+                            Math.max(leftInset, v.getPaddingLeft()),
+                            Math.max(topInset, v.getPaddingTop()),
+                            Math.max(rightInset, v.getPaddingRight()),
+                            Math.max(bottomInset, v.getPaddingBottom())
+                    );
+                    
+                    return insets;
+                });
+            }
+        }
     }
 
     private void setupParameters() {
@@ -175,14 +233,14 @@ public class CommandDialogFragment extends DialogFragment {
 
     private void sendCommand() {
         if (viewModel == null || command == null) {
-            Toast.makeText(getContext(), "Error: ViewModel or Command not initialized", Toast.LENGTH_LONG).show();
+            if (getContext() != null) {
+                Toast.makeText(getContext(), "Error: Unable to process command. Please try again.", Toast.LENGTH_LONG).show();
+            }
             return;
         }
 
-        if (!viewModel.isBluetoothConnected()) {
-            Toast.makeText(getContext(), "Please connect to a Bluetooth device in settings", Toast.LENGTH_LONG).show();
-            return;
-        }
+        // The ViewModel will automatically connect to the selected device if needed
+        // No need to check connection status here - let ViewModel handle it
 
         // Validate and collect parameter values
         Map<String, String> parameterValues = new HashMap<>();
@@ -192,16 +250,36 @@ public class CommandDialogFragment extends DialogFragment {
         
         if (command.getParameters() == null || command.getParameters().isEmpty()) {
             // No parameters, send command directly
+            // Show loading feedback
+            if (sendButton != null) {
+                sendButton.setEnabled(false);
+                sendButton.setText("Connecting...");
+            }
+            
+            // Send command - ViewModel will handle connection automatically
             viewModel.sendCommand(command.getPayload(), parameterValues, parameterDefinitions, new CommandViewModel.SendCommandCallback() {
                 @Override
                 public void onSuccess(String payload) {
-                    Toast.makeText(getContext(), "Command sent successfully", Toast.LENGTH_SHORT).show();
+                    if (sendButton != null) {
+                        sendButton.setEnabled(true);
+                        sendButton.setText("Send Command");
+                    }
+                    if (getContext() != null) {
+                        Toast.makeText(getContext(), getString(R.string.success_command_sent), Toast.LENGTH_SHORT).show();
+                    }
                     dismiss();
                 }
 
                 @Override
                 public void onError(String error) {
-                    Toast.makeText(getContext(), "Error: " + error, Toast.LENGTH_LONG).show();
+                    if (sendButton != null) {
+                        sendButton.setEnabled(true);
+                        sendButton.setText("Send Command");
+                    }
+                    if (getContext() != null) {
+                        String errorMsg = error != null ? error : getString(R.string.error_payload_send_failed);
+                        Toast.makeText(getContext(), errorMsg, Toast.LENGTH_LONG).show();
+                    }
                 }
             });
             return;
@@ -232,8 +310,8 @@ public class CommandDialogFragment extends DialogFragment {
                 // Validate required
                 if (param.getRequired() != null && !param.getRequired().isEmpty()) {
                     if (!ValidationUtils.validateInput(value, param.getRequired())) {
-                        if (editText != null) {
-                            editText.setError("Invalid format");
+                        if (editText != null && getContext() != null) {
+                            editText.setError(getString(R.string.error_parameter_invalid_format));
                         }
                         isValid = false;
                         continue;
@@ -243,8 +321,8 @@ public class CommandDialogFragment extends DialogFragment {
                 // Validate integer min/max
                 if ("int".equalsIgnoreCase(param.getType())) {
                     if (!ValidationUtils.validateInteger(value, param.getMin(), param.getMax())) {
-                        if (editText != null) {
-                            editText.setError("Value out of range");
+                        if (editText != null && getContext() != null) {
+                            editText.setError(getString(R.string.error_parameter_out_of_range));
                         }
                         isValid = false;
                         continue;
@@ -276,16 +354,30 @@ public class CommandDialogFragment extends DialogFragment {
             return;
         }
 
-        // Send command
+        // Show loading feedback
+        if (sendButton != null) {
+            sendButton.setEnabled(false);
+            sendButton.setText("Connecting...");
+        }
+
+        // Send command - ViewModel will handle connection automatically
         viewModel.sendCommand(command.getPayload(), parameterValues, parameterDefinitions, new CommandViewModel.SendCommandCallback() {
             @Override
             public void onSuccess(String payload) {
+                if (sendButton != null) {
+                    sendButton.setEnabled(true);
+                    sendButton.setText("Send Command");
+                }
                 Toast.makeText(getContext(), "Command sent successfully", Toast.LENGTH_SHORT).show();
                 dismiss();
             }
 
             @Override
             public void onError(String error) {
+                if (sendButton != null) {
+                    sendButton.setEnabled(true);
+                    sendButton.setText("Send Command");
+                }
                 Toast.makeText(getContext(), "Error: " + error, Toast.LENGTH_LONG).show();
             }
         });

@@ -73,6 +73,23 @@ public class PayloadBuilder {
         }
 
         String result = payload;
+        String checksumPlaceholder = null;
+        String checksumKey = null;
+
+        // First pass: Identify checksum parameter and replace all non-checksum parameters
+        if (parameterDefinitions != null) {
+            for (Map.Entry<String, Parameter> paramEntry : parameterDefinitions.entrySet()) {
+                String key = paramEntry.getKey();
+                Parameter param = paramEntry.getValue();
+                
+                // Check if this is a checksum parameter by type
+                if (param != null && param.getType() != null && "checksum".equalsIgnoreCase(param.getType())) {
+                    checksumKey = key;
+                    checksumPlaceholder = "{" + key + "}";
+                    break; // Found checksum parameter
+                }
+            }
+        }
 
         // Replace all non-checksum parameters with proper value transformation
         for (Map.Entry<String, String> entry : parameterValues.entrySet()) {
@@ -80,7 +97,11 @@ public class PayloadBuilder {
             String value = entry.getValue();
             String placeholder = "{" + key + "}";
 
-            // Skip checksum placeholder
+            // Skip checksum placeholder - it will be calculated later
+            if (checksumKey != null && key.equals(checksumKey)) {
+                continue;
+            }
+            // Also skip if key is "CHK" or "chk" for backward compatibility
             if (key.equals("CHK") || key.equals("chk")) {
                 continue;
             }
@@ -89,7 +110,7 @@ public class PayloadBuilder {
             String valueType = "equal";
             if (parameterDefinitions != null && parameterDefinitions.containsKey(key)) {
                 Parameter param = parameterDefinitions.get(key);
-                if (param.getValue() != null) {
+                if (param != null && param.getValue() != null) {
                     valueType = param.getValue();
                 }
             }
@@ -99,14 +120,23 @@ public class PayloadBuilder {
         }
 
         // Calculate and replace checksum
-        Pattern checksumPattern = Pattern.compile("\\{CHK\\}", Pattern.CASE_INSENSITIVE);
-        Matcher checksumMatcher = checksumPattern.matcher(result);
-
-        if (checksumMatcher.find()) {
-            int checksumIndex = checksumMatcher.start();
+        // First try to find checksum by parameter key (dynamic placeholder)
+        if (checksumPlaceholder != null && result.contains(checksumPlaceholder)) {
+            int checksumIndex = result.indexOf(checksumPlaceholder);
             String beforeChecksum = result.substring(0, checksumIndex);
             String checksum = calculateChecksumUseCase.calculate(beforeChecksum);
-            result = checksumMatcher.replaceFirst(checksum);
+            result = result.replace(checksumPlaceholder, checksum);
+        } else {
+            // Fallback: Look for {CHK} placeholder (backward compatibility)
+            Pattern checksumPattern = Pattern.compile("\\{CHK\\}", Pattern.CASE_INSENSITIVE);
+            Matcher checksumMatcher = checksumPattern.matcher(result);
+
+            if (checksumMatcher.find()) {
+                int checksumIndex = checksumMatcher.start();
+                String beforeChecksum = result.substring(0, checksumIndex);
+                String checksum = calculateChecksumUseCase.calculate(beforeChecksum);
+                result = checksumMatcher.replaceFirst(checksum);
+            }
         }
 
         return result;

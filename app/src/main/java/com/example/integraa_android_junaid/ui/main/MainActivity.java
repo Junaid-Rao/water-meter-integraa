@@ -21,11 +21,16 @@ import com.example.integraa_android_junaid.ui.login.LoginActivity;
 import com.example.integraa_android_junaid.ui.settings.BluetoothSettingsFragment;
 import com.example.integraa_android_junaid.util.PermissionHelper;
 import com.example.integraa_android_junaid.util.WorkManagerHelper;
+import com.google.android.material.chip.Chip;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
+import com.example.integraa_android_junaid.data.bluetooth.BluetoothManager;
+import com.example.integraa_android_junaid.data.local.SharedPreferencesManager;
 
 import java.util.List;
+
+import javax.inject.Inject;
 
 import dagger.hilt.android.AndroidEntryPoint;
 
@@ -41,6 +46,13 @@ public class MainActivity extends AppCompatActivity {
     private TabLayoutMediator tabLayoutMediator;
     private long lastFabClickTime = 0;
     private static final long FAB_CLICK_THROTTLE_MS = 1000; // Prevent rapid clicks
+    private Chip connectionStatusChip;
+    
+    @Inject
+    BluetoothManager bluetoothManager;
+    
+    @Inject
+    SharedPreferencesManager preferencesManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,10 +79,80 @@ public class MainActivity extends AppCompatActivity {
             
             // Schedule background permission refresh
             WorkManagerHelper.schedulePermissionRefresh(this);
+            
+            // Update connection status
+            updateConnectionStatus();
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Error initializing activity: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+    
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Update connection status when activity resumes
+        updateConnectionStatus();
+        
+        // Also set up a handler to periodically check connection status
+        // This helps catch connection state changes
+        if (connectionStatusChip != null) {
+            android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+            handler.postDelayed(() -> updateConnectionStatus(), 1000);
+        }
+    }
+    
+    /**
+     * Called when a device is selected in BluetoothSettingsFragment
+     */
+    public void onDeviceSelected() {
+        updateConnectionStatus();
+    }
+
+    private void updateConnectionStatus() {
+        if (connectionStatusChip == null) {
+            return;
+        }
+        
+        // Run on UI thread to ensure thread safety
+        runOnUiThread(() -> {
+            try {
+                String deviceAddress = preferencesManager.getBluetoothDeviceAddress();
+                boolean isConnected = bluetoothManager != null && bluetoothManager.isConnected();
+                
+                if (deviceAddress == null || deviceAddress.isEmpty()) {
+                    connectionStatusChip.setText("No Device");
+                    connectionStatusChip.setChipBackgroundColorResource(android.R.color.holo_red_light);
+                } else if (isConnected) {
+                    String deviceName = preferencesManager.getBluetoothDeviceName();
+                    if (deviceName != null && !deviceName.isEmpty()) {
+                        // Truncate long names
+                        if (deviceName.length() > 15) {
+                            deviceName = deviceName.substring(0, 12) + "...";
+                        }
+                        connectionStatusChip.setText("Connected: " + deviceName);
+                    } else {
+                        connectionStatusChip.setText("Connected");
+                    }
+                    connectionStatusChip.setChipBackgroundColorResource(android.R.color.holo_green_light);
+                } else {
+                    String deviceName = preferencesManager.getBluetoothDeviceName();
+                    if (deviceName != null && !deviceName.isEmpty()) {
+                        if (deviceName.length() > 15) {
+                            deviceName = deviceName.substring(0, 12) + "...";
+                        }
+                        connectionStatusChip.setText("Selected: " + deviceName);
+                    } else {
+                        connectionStatusChip.setText("Device Selected");
+                    }
+                    connectionStatusChip.setChipBackgroundColorResource(android.R.color.holo_orange_light);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                connectionStatusChip.setText("Status Unknown");
+                connectionStatusChip.setChipBackgroundColorResource(android.R.color.holo_red_light);
+            }
+        });
     }
     
     @Override
@@ -90,6 +172,7 @@ public class MainActivity extends AppCompatActivity {
             progressBar = findViewById(R.id.progressBar);
             errorTextView = findViewById(R.id.errorTextView);
             settingsFab = findViewById(R.id.settingsFab);
+            connectionStatusChip = findViewById(R.id.connectionStatusChip);
             
             // Set toolbar as action bar (only works with NoActionBar theme)
             // Wrap in try-catch to prevent crash if theme issue persists
@@ -189,11 +272,12 @@ public class MainActivity extends AppCompatActivity {
         viewModel.getSessionExpired().observe(this, expired -> {
             if (expired) {
                 new AlertDialog.Builder(this)
-                        .setTitle("Session Expired")
-                        .setMessage("Your session has expired. Please login again.")
-                        .setPositiveButton("OK", (dialog, which) -> {
+                        .setTitle(getString(R.string.dialog_session_expired_title))
+                        .setMessage(getString(R.string.dialog_session_expired_message))
+                        .setPositiveButton(getString(R.string.dialog_ok), (dialog, which) -> {
                             viewModel.logout();
                             Intent intent = new Intent(this, LoginActivity.class);
+                            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                             startActivity(intent);
                             finish();
                         })

@@ -32,26 +32,29 @@ public class CommandViewModel extends ViewModel {
     private Map<String, Parameter> pendingParameterDefinitions;
 
     public void sendCommand(String payload, Map<String, String> parameterValues, Map<String, Parameter> parameterDefinitions, SendCommandCallback callback) {
-        // Check if device is connected, if not, connect to saved device
-        if (!bluetoothManager.isConnected()) {
-            String deviceAddress = preferencesManager.getBluetoothDeviceAddress();
-            if (deviceAddress == null || deviceAddress.isEmpty()) {
-                callback.onError("No Bluetooth device selected. Please select a device in settings.");
-                return;
-            }
+        // First check if a device is selected
+        String deviceAddress = preferencesManager.getBluetoothDeviceAddress();
+        if (deviceAddress == null || deviceAddress.isEmpty()) {
+            callback.onError("No Bluetooth device selected. Please select a device from settings first.");
+            return;
+        }
 
+        // Check if device is already connected, if not, connect to saved device
+        if (!bluetoothManager.isConnected()) {
             // Store command details for when connection completes
             pendingCallback = callback;
             pendingPayload = payload;
             pendingParameterValues = parameterValues;
             pendingParameterDefinitions = parameterDefinitions;
 
-            // Connect to the saved device
+            // Connect to the saved device (one-time connection as per requirements)
             bluetoothManager.connectToDeviceByAddress(deviceAddress, new BluetoothManager.BluetoothGattCallback() {
                 @Override
                 public void onConnected() {
                     // Device connected, wait for services discovery
                     android.util.Log.d("CommandViewModel", "Device connected, waiting for services...");
+                    // Notify MainActivity to update connection status
+                    updateMainActivityConnectionStatus();
                 }
 
                 @Override
@@ -66,6 +69,8 @@ public class CommandViewModel extends ViewModel {
                 public void onServicesDiscovered() {
                     // Services discovered, now we can send the command
                     android.util.Log.d("CommandViewModel", "Services discovered, sending command...");
+                    // Notify MainActivity to update connection status
+                    updateMainActivityConnectionStatus();
                     if (pendingPayload != null && pendingCallback != null) {
                         sendCommandInternal(pendingPayload, pendingParameterValues, pendingParameterDefinitions, pendingCallback);
                         clearPendingCommand();
@@ -75,7 +80,13 @@ public class CommandViewModel extends ViewModel {
                 @Override
                 public void onConnectionFailed(String error) {
                     if (pendingCallback != null) {
-                        pendingCallback.onError("Failed to connect to device: " + error);
+                        String errorMsg = "Failed to connect to device";
+                        if (error != null && !error.isEmpty()) {
+                            errorMsg += ": " + error;
+                        } else {
+                            errorMsg += ". Please ensure the device is nearby, powered on, and try again.";
+                        }
+                        pendingCallback.onError(errorMsg);
                         clearPendingCommand();
                     }
                 }
@@ -102,19 +113,30 @@ public class CommandViewModel extends ViewModel {
 
         try {
             String finalPayload = payloadBuilder.buildPayload(payload, parameterValues, parameterDefinitions);
-            boolean success = bluetoothManager.sendHexPayload(finalPayload);
-            if (success) {
+            BluetoothManager.SendResult result = bluetoothManager.sendHexPayload(finalPayload);
+            if (result.isSuccess()) {
                 callback.onSuccess(finalPayload);
             } else {
-                callback.onError("Failed to send payload to Bluetooth device");
+                String errorMsg = result.getErrorMessage();
+                if (errorMsg == null || errorMsg.isEmpty()) {
+                    errorMsg = "Failed to send command to device. Please check the connection and try again.";
+                }
+                callback.onError(errorMsg);
             }
+        } catch (IllegalArgumentException e) {
+            callback.onError("Invalid command format. Please try again or contact support.");
         } catch (Exception e) {
-            callback.onError("Error building payload: " + e.getMessage());
+            callback.onError("Error processing command. Please try again.");
         }
     }
 
     public boolean isBluetoothConnected() {
         return bluetoothManager.isConnected();
+    }
+    
+    private void updateMainActivityConnectionStatus() {
+        // This will be called from MainActivity if needed
+        // For now, we'll rely on MainActivity's onResume and manual updates
     }
 
     public interface SendCommandCallback {
