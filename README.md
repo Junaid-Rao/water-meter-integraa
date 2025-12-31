@@ -18,7 +18,7 @@ Water Meter Integraa is an Android application designed to interact with water m
 
 A comprehensive video demonstration of the application is available in the repository:
 
-**[Video Link: To be added - Video will be uploaded to GitHub repository]**
+**[Video Link: App Demo](https://github.com/Junaid-Rao/water-meter-integraa/blob/main/Water-Meter-App-Demo.mp4)**
 
 The video covers:
 - Application overview and features
