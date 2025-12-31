@@ -4,14 +4,15 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:fillViewport="true">
+    android:fillViewport="false"
+    android:scrollbars="vertical">
 
 <androidx.constraintlayout.widget.ConstraintLayout
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:padding="16dp"
-    android:minHeight="300dp"
-    android:maxHeight="600dp">
+    android:paddingBottom="16dp"
+    android:minHeight="300dp">
 
     <TextView
         android:id="@+id/titleTextView"
@@ -28,19 +29,27 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
+        android:padding="12dp"
+        android:background="?attr/selectableItemBackground"
         android:text="No device selected"
+        android:textAppearance="?attr/textAppearanceBody1"
+        android:textColor="?android:attr/textColorSecondary"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/titleTextView"
-        tools:text="Selected: Device Name (00:11:22:33:44:55)" />
+        tools:text="✓ Selected: Device Name&#10;(00:11:22:33:44:55)" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/devicesRecyclerView"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:minHeight="100dp"
-        android:maxHeight="400dp"
+        android:layout_marginBottom="8dp"
+        android:minHeight="150dp"
+        android:nestedScrollingEnabled="false"
+        android:clipToPadding="false"
+        android:paddingBottom="48dp"
+        android:overScrollMode="never"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/selectedDeviceTextView"
@@ -61,15 +70,46 @@
         app:layout_constraintTop_toTopOf="@id/devicesRecyclerView"
         tools:visibility="visible" />
 
+    <LinearLayout
+        android:id="@+id/buttonContainer"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/devicesRecyclerView">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/refreshButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:text="Refresh Paired" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/scanButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:text="Scan New Devices" />
+    </LinearLayout>
+
     <com.google.android.material.button.MaterialButton
-        android:id="@+id/refreshButton"
+        android:id="@+id/closeButton"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
-        android:text="Refresh Devices"
+        android:layout_marginBottom="8dp"
+        android:minHeight="56dp"
+        android:text="Close"
+        android:textSize="16sp"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/devicesRecyclerView" />
+        app:layout_constraintTop_toBottomOf="@id/buttonContainer" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
 

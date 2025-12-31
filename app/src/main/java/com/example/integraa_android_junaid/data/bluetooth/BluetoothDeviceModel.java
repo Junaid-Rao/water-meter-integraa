@@ -14,7 +14,14 @@ public class BluetoothDeviceModel {
     }
 
     public String getName() {
-        return name != null ? name : "Unknown Device";
+        if (name != null && !name.isEmpty()) {
+            return name;
+        }
+        // If name is not available, return a descriptive name with address
+        if (address != null && !address.isEmpty()) {
+            return "Device (" + address + ")";
+        }
+        return "Unknown Device";
     }
 
     public void setName(String name) {

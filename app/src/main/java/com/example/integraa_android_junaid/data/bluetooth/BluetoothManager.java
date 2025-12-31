@@ -6,10 +6,17 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -17,6 +24,7 @@ import androidx.core.content.ContextCompat;
 import com.example.integraa_android_junaid.util.PermissionHelper;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -30,6 +38,11 @@ public class BluetoothManager {
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothGatt bluetoothGatt;
     private BluetoothDevice connectedDevice;
+    private BluetoothLeScanner bluetoothLeScanner;
+    private BluetoothScanCallback scanCallback;
+    private Set<String> scannedDeviceAddresses = new HashSet<>();
+    private Handler mainHandler = new Handler(Looper.getMainLooper());
+    private static final long SCAN_DURATION_MS = 10000; // 10 seconds
 
     public BluetoothManager(Context context) {
         this.context = context;
@@ -37,6 +50,9 @@ public class BluetoothManager {
             android.bluetooth.BluetoothManager bluetoothManager = (android.bluetooth.BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
             if (bluetoothManager != null) {
                 bluetoothAdapter = bluetoothManager.getAdapter();
+                if (bluetoothAdapter != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+                }
             }
         } catch (SecurityException e) {
             Log.e(TAG, "Bluetooth permission not granted", e);
@@ -79,13 +95,23 @@ public class BluetoothManager {
             if (pairedDevices != null) {
                 for (BluetoothDevice device : pairedDevices) {
                     try {
-                        String name = device.getName();
-                        String address = device.getAddress();
-                        if (name != null && address != null) {
+                        String name = null;
+                        String address = null;
+                        
+                        try {
+                            name = device.getName();
+                            address = device.getAddress();
+                        } catch (SecurityException e) {
+                            Log.w(TAG, "Permission denied accessing device info", e);
+                        }
+                        
+                        if (address != null && !address.isEmpty()) {
+                            // If name is null or empty, use address as fallback
+                            if (name == null || name.isEmpty()) {
+                                name = "Device (" + address + ")";
+                            }
                             devices.add(new BluetoothDeviceModel(name, address, device));
                         }
-                    } catch (SecurityException e) {
-                        Log.w(TAG, "Permission denied accessing device info", e);
                     } catch (Exception e) {
                         Log.w(TAG, "Error processing device", e);
                     }
@@ -112,12 +138,54 @@ public class BluetoothManager {
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            bluetoothGatt = device.connectGatt(context, false, callback);
-        } else {
-            bluetoothGatt = device.connectGatt(context, false, callback);
+        // Disconnect existing connection if any
+        if (bluetoothGatt != null) {
+            disconnect();
         }
-        connectedDevice = device;
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                bluetoothGatt = device.connectGatt(context, false, callback);
+            } else {
+                bluetoothGatt = device.connectGatt(context, false, callback);
+            }
+            connectedDevice = device;
+            Log.d(TAG, "Connecting to device: " + device.getAddress());
+        } catch (SecurityException e) {
+            Log.e(TAG, "Permission denied connecting to device", e);
+            if (callback != null) {
+                callback.onConnectionFailed("Permission denied");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error connecting to device", e);
+            if (callback != null) {
+                callback.onConnectionFailed("Connection error: " + e.getMessage());
+            }
+        }
+    }
+
+    public void connectToDeviceByAddress(String address, BluetoothGattCallback callback) {
+        if (bluetoothAdapter == null || address == null || address.isEmpty()) {
+            if (callback != null) {
+                callback.onConnectionFailed("Invalid device address");
+            }
+            return;
+        }
+
+        try {
+            BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
+            connectToDevice(device, callback);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Permission denied getting remote device", e);
+            if (callback != null) {
+                callback.onConnectionFailed("Permission denied");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting remote device", e);
+            if (callback != null) {
+                callback.onConnectionFailed("Error: " + e.getMessage());
+            }
+        }
     }
 
     public void disconnect() {
@@ -181,6 +249,179 @@ public class BluetoothManager {
 
     public BluetoothDevice getConnectedDevice() {
         return connectedDevice;
+    }
+
+    public void startScanning(BluetoothScanCallback callback) {
+        if (!hasBluetoothPermissions()) {
+            Log.w(TAG, "Bluetooth permissions not granted for scanning");
+            if (callback != null) {
+                callback.onScanError("Bluetooth permissions not granted");
+            }
+            return;
+        }
+
+        if (bluetoothAdapter == null || !bluetoothAdapter.isEnabled()) {
+            Log.w(TAG, "Bluetooth not enabled");
+            if (callback != null) {
+                callback.onScanError("Bluetooth not enabled");
+            }
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            Log.w(TAG, "BLE scanning requires Android 5.0+");
+            if (callback != null) {
+                callback.onScanError("BLE scanning not supported on this device");
+            }
+            return;
+        }
+
+        if (bluetoothLeScanner == null) {
+            bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+        }
+
+        if (bluetoothLeScanner == null) {
+            Log.e(TAG, "BluetoothLeScanner not available");
+            if (callback != null) {
+                callback.onScanError("Bluetooth scanner not available");
+            }
+            return;
+        }
+
+        // Stop any existing scan
+        stopScanning();
+
+        scannedDeviceAddresses.clear();
+        this.scanCallback = callback;
+
+        try {
+            ScanSettings scanSettings = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .build();
+
+            List<ScanFilter> scanFilters = new ArrayList<>(); // No filters - scan all devices
+
+            bluetoothLeScanner.startScan(scanFilters, scanSettings, new ScanCallback() {
+                @Override
+                public void onScanResult(int callbackType, ScanResult result) {
+                    if (result != null && result.getDevice() != null) {
+                        BluetoothDevice device = result.getDevice();
+                        String address = device.getAddress();
+                        
+                        // Avoid duplicates
+                        if (!scannedDeviceAddresses.contains(address)) {
+                            scannedDeviceAddresses.add(address);
+                            try {
+                                String name = null;
+                                
+                                // Try to get name from device first
+                                try {
+                                    name = device.getName();
+                                } catch (SecurityException e) {
+                                    Log.w(TAG, "Permission denied getting device name", e);
+                                }
+                                
+                                // If name is null, try to get it from ScanRecord
+                                if ((name == null || name.isEmpty()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                    try {
+                                        android.bluetooth.le.ScanRecord scanRecord = result.getScanRecord();
+                                        if (scanRecord != null) {
+                                            String deviceName = scanRecord.getDeviceName();
+                                            if (deviceName != null && !deviceName.isEmpty()) {
+                                                name = deviceName;
+                                            }
+                                        }
+                                    } catch (Exception e) {
+                                        Log.w(TAG, "Error getting name from scan record", e);
+                                    }
+                                }
+                                
+                                // If still no name, use a descriptive fallback with MAC address
+                                if (name == null || name.isEmpty()) {
+                                    // Format MAC address for display (e.g., "Device (AA:BB:CC:DD:EE:FF)")
+                                    name = "Device (" + address + ")";
+                                }
+                                
+                                BluetoothDeviceModel deviceModel = new BluetoothDeviceModel(name, address, device);
+                                if (scanCallback != null) {
+                                    scanCallback.onDeviceFound(deviceModel);
+                                }
+                            } catch (SecurityException e) {
+                                Log.w(TAG, "Permission denied accessing device info", e);
+                                // Still create device model with address as name
+                                String fallbackName = "Device (" + address + ")";
+                                BluetoothDeviceModel deviceModel = new BluetoothDeviceModel(fallbackName, address, device);
+                                if (scanCallback != null) {
+                                    scanCallback.onDeviceFound(deviceModel);
+                                }
+                            } catch (Exception e) {
+                                Log.w(TAG, "Error processing scanned device", e);
+                            }
+                        }
+                    }
+                }
+
+                @Override
+                public void onScanFailed(int errorCode) {
+                    String error = "Scan failed with error code: " + errorCode;
+                    Log.e(TAG, error);
+                    if (scanCallback != null) {
+                        scanCallback.onScanError(error);
+                    }
+                }
+            });
+
+            // Auto-stop after scan duration
+            mainHandler.postDelayed(() -> {
+                stopScanning();
+                if (scanCallback != null) {
+                    scanCallback.onScanFinished();
+                }
+            }, SCAN_DURATION_MS);
+
+            Log.d(TAG, "BLE scanning started");
+        } catch (SecurityException e) {
+            Log.e(TAG, "Bluetooth permission not granted for scanning", e);
+            if (callback != null) {
+                callback.onScanError("Bluetooth permission not granted");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting scan", e);
+            if (callback != null) {
+                callback.onScanError("Error starting scan: " + e.getMessage());
+            }
+        }
+    }
+
+    public void stopScanning() {
+        if (bluetoothLeScanner != null && scanCallback != null) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    bluetoothLeScanner.stopScan(new ScanCallback() {
+                        @Override
+                        public void onScanResult(int callbackType, ScanResult result) {
+                            // Empty implementation
+                        }
+
+                        @Override
+                        public void onScanFailed(int errorCode) {
+                            // Empty implementation
+                        }
+                    });
+                }
+                Log.d(TAG, "BLE scanning stopped");
+            } catch (Exception e) {
+                Log.e(TAG, "Error stopping scan", e);
+            }
+        }
+        scanCallback = null;
+        scannedDeviceAddresses.clear();
+    }
+
+    public interface BluetoothScanCallback {
+        void onDeviceFound(BluetoothDeviceModel device);
+        void onScanFinished();
+        void onScanError(String error);
     }
 
     public abstract static class BluetoothGattCallback extends android.bluetooth.BluetoothGattCallback {

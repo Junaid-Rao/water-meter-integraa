@@ -31,7 +31,10 @@ public class BluetoothSettingsFragment extends DialogFragment {
     private TextView selectedDeviceTextView;
     private TextView emptyTextView;
     private MaterialButton refreshButton;
+    private MaterialButton scanButton;
+    private MaterialButton closeButton;
     private BluetoothDeviceAdapter adapter;
+    private List<BluetoothDeviceModel> allDevices = new java.util.ArrayList<>();
 
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
@@ -74,6 +77,8 @@ public class BluetoothSettingsFragment extends DialogFragment {
             selectedDeviceTextView = view.findViewById(R.id.selectedDeviceTextView);
             emptyTextView = view.findViewById(R.id.emptyTextView);
             refreshButton = view.findViewById(R.id.refreshButton);
+            scanButton = view.findViewById(R.id.scanButton);
+            closeButton = view.findViewById(R.id.closeButton);
 
             if (devicesRecyclerView == null || getContext() == null) {
                 return view;
@@ -82,13 +87,79 @@ public class BluetoothSettingsFragment extends DialogFragment {
             adapter = new BluetoothDeviceAdapter();
             adapter.setOnDeviceClickListener(device -> {
                 if (device != null && viewModel != null) {
+                    String deviceName = device.getName();
+                    String deviceAddress = device.getAddress();
+                    
+                    // Select the device
                     viewModel.selectDevice(device);
-                    Toast.makeText(getContext(), "Device selected: " + (device.getName() != null ? device.getName() : "Unknown"), Toast.LENGTH_SHORT).show();
+                    
+                    // Show clear success message with device details
+                    String message = "Device selected successfully!\n" + deviceName;
+                    if (deviceAddress != null && !deviceAddress.isEmpty()) {
+                        message += "\n(" + deviceAddress + ")";
+                    }
+                    Toast.makeText(getContext(), message, Toast.LENGTH_LONG).show();
+                    
+                    // Auto-close dialog after device selection
+                    if (isAdded()) {
+                        // Small delay to show the toast message
+                        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                            if (isAdded()) {
+                                dismiss();
+                            }
+                        }, 500);
+                    }
                 }
             });
 
-            devicesRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+            // Use LinearLayoutManager with proper scrolling
+            LinearLayoutManager layoutManager = new LinearLayoutManager(getContext());
+            devicesRecyclerView.setLayoutManager(layoutManager);
             devicesRecyclerView.setAdapter(adapter);
+            // Disable nested scrolling so NestedScrollView handles it
+            devicesRecyclerView.setNestedScrollingEnabled(false);
+            // Add item decoration for spacing
+            devicesRecyclerView.addItemDecoration(new androidx.recyclerview.widget.DividerItemDecoration(getContext(), layoutManager.getOrientation()));
+
+            if (closeButton != null) {
+                closeButton.setOnClickListener(v -> {
+                    if (isAdded()) {
+                        dismiss();
+                    }
+                });
+            }
+
+            if (scanButton != null) {
+                scanButton.setOnClickListener(v -> {
+                    try {
+                        if (getActivity() == null || !isAdded()) {
+                            return;
+                        }
+
+                        if (!com.example.integraa_android_junaid.util.PermissionHelper.hasBluetoothPermissions(getActivity())) {
+                            com.example.integraa_android_junaid.util.PermissionHelper.requestBluetoothPermissions(getActivity());
+                            Toast.makeText(getContext(), "Please grant Bluetooth permissions", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+
+                        if (viewModel == null) {
+                            return;
+                        }
+
+                        Boolean isScanning = viewModel.getIsScanning().getValue();
+                        if (isScanning != null && isScanning) {
+                            viewModel.stopScanning();
+                            scanButton.setText("Scan New Devices");
+                        } else {
+                            viewModel.startScanning();
+                            scanButton.setText("Stop Scanning");
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        Toast.makeText(getContext(), "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
 
             if (refreshButton != null) {
                 refreshButton.setOnClickListener(v -> {
@@ -185,40 +256,47 @@ public class BluetoothSettingsFragment extends DialogFragment {
             return;
         }
 
+        // Observe paired devices
         viewModel.getPairedDevices().observe(this, devices -> {
-            if (adapter == null || devicesRecyclerView == null || emptyTextView == null) {
-                return;
-            }
+            updateDeviceList();
+        });
 
-            if (devices != null && !devices.isEmpty()) {
-                // Show devices
-                adapter.setDevices(devices);
-                devicesRecyclerView.setVisibility(View.VISIBLE);
-                emptyTextView.setVisibility(View.GONE);
-            } else {
-                // Show empty state
-                adapter.setDevices(new java.util.ArrayList<>());
-                devicesRecyclerView.setVisibility(View.GONE);
-                emptyTextView.setVisibility(View.VISIBLE);
-                
-                // Set appropriate message based on state
-                String message = "No paired devices found.\nPlease pair a Bluetooth device in system settings first.";
-                if (getActivity() != null && !com.example.integraa_android_junaid.util.PermissionHelper.hasBluetoothPermissions(getActivity())) {
-                    message = "Bluetooth permissions required.\nPlease grant permissions to view devices.";
-                } else if (viewModel != null && viewModel.getIsBluetoothEnabled().getValue() != null && !viewModel.getIsBluetoothEnabled().getValue()) {
-                    message = "Bluetooth is disabled.\nPlease enable Bluetooth in system settings.";
+        // Observe scanned devices
+        viewModel.getScannedDevices().observe(this, devices -> {
+            updateDeviceList();
+        });
+
+        // Observe scanning state
+        viewModel.getIsScanning().observe(this, isScanning -> {
+            if (scanButton != null && isAdded()) {
+                if (isScanning != null && isScanning) {
+                    scanButton.setText("Stop Scanning");
+                    scanButton.setEnabled(true);
+                } else {
+                    scanButton.setText("Scan New Devices");
+                    scanButton.setEnabled(true);
                 }
-                emptyTextView.setText(message);
             }
         });
 
         viewModel.getSelectedDeviceName().observe(this, name -> {
             if (selectedDeviceTextView != null && viewModel != null) {
                 String address = viewModel.getSelectedDeviceAddress().getValue();
-                if (name != null && address != null) {
-                    selectedDeviceTextView.setText("Selected: " + name + " (" + address + ")");
+                if (name != null && !name.isEmpty() && address != null && !address.isEmpty()) {
+                    // Show clear status with device name and address
+                    selectedDeviceTextView.setText("✓ Selected: " + name + "\n(" + address + ")");
+                    try {
+                        selectedDeviceTextView.setTextColor(getResources().getColor(android.R.color.holo_green_dark, null));
+                    } catch (Exception e) {
+                        // Fallback if color not available
+                    }
                 } else {
                     selectedDeviceTextView.setText("No device selected");
+                    try {
+                        selectedDeviceTextView.setTextColor(getResources().getColor(android.R.color.darker_gray, null));
+                    } catch (Exception e) {
+                        // Fallback if color not available
+                    }
                 }
             }
         });
@@ -238,6 +316,75 @@ public class BluetoothSettingsFragment extends DialogFragment {
             }
             // Don't auto-load devices here to prevent loops - let user click refresh or load on init
         });
+    }
+
+    private void updateDeviceList() {
+        if (adapter == null || devicesRecyclerView == null || emptyTextView == null || viewModel == null) {
+            return;
+        }
+
+        // Re-enable refresh button when data is received
+        if (refreshButton != null && isAdded()) {
+            refreshButton.setEnabled(true);
+            refreshButton.setText("Refresh Paired");
+        }
+
+        // Combine paired and scanned devices
+        List<BluetoothDeviceModel> paired = viewModel.getPairedDevices().getValue();
+        List<BluetoothDeviceModel> scanned = viewModel.getScannedDevices().getValue();
+        
+        allDevices.clear();
+        
+        // Add paired devices first
+        if (paired != null && !paired.isEmpty()) {
+            allDevices.addAll(paired);
+        }
+        
+        // Add scanned devices (avoid duplicates by address)
+        if (scanned != null && !scanned.isEmpty()) {
+            for (BluetoothDeviceModel scannedDevice : scanned) {
+                boolean exists = false;
+                for (BluetoothDeviceModel existing : allDevices) {
+                    if (existing.getAddress().equals(scannedDevice.getAddress())) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    allDevices.add(scannedDevice);
+                }
+            }
+        }
+
+        if (!allDevices.isEmpty()) {
+            // Show devices
+            adapter.setDevices(allDevices);
+            devicesRecyclerView.setVisibility(View.VISIBLE);
+            emptyTextView.setVisibility(View.GONE);
+        } else {
+            // Show empty state
+            adapter.setDevices(new java.util.ArrayList<>());
+            devicesRecyclerView.setVisibility(View.GONE);
+            emptyTextView.setVisibility(View.VISIBLE);
+            
+            // Set appropriate message based on state
+            String message = "No devices found.\nClick 'Refresh Paired' for paired devices or 'Scan New Devices' to discover nearby devices.";
+            if (getActivity() != null && !com.example.integraa_android_junaid.util.PermissionHelper.hasBluetoothPermissions(getActivity())) {
+                message = "Bluetooth permissions required.\nPlease grant permissions to view devices.";
+            } else if (viewModel != null && viewModel.getIsBluetoothEnabled().getValue() != null && !viewModel.getIsBluetoothEnabled().getValue()) {
+                message = "Bluetooth is disabled.\nPlease enable Bluetooth in system settings.";
+            }
+            emptyTextView.setText(message);
+        }
+    }
+
+    @Override
+    public void onDestroyView() {
+        // Stop scanning when fragment is destroyed
+        if (viewModel != null) {
+            viewModel.stopScanning();
+        }
+        super.onDestroyView();
     }
 }
 
